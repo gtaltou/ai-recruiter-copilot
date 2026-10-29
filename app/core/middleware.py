@@ -1,34 +1,46 @@
-from fastapi import Request, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+import time
+import json
+import logging
+from uuid import uuid4
 from starlette.middleware.base import BaseHTTPMiddleware
-from app.core.security import security_settings, rate_limiter, verify_jwt_token
+from starlette.requests import Request
+from starlette.responses import Response
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
+logger = logging.getLogger("ai-recruiter-copilot")
+metrics_logger = logging.getLogger("app.metrics")
+
+
+class StructuredLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        client_ip = request.client.host if request.client else "unknown"
-        if not rate_limiter.check(client_ip):
-            raise HTTPException(status_code=429, detail="Too many requests. Slow down!")
-        return await call_next(request)
+        request_id = str(uuid4())
+        request.state.request_id = request_id
+        logger.info("Incoming request", extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+        })
+        start_time = time.time()
+        response = await call_next(request)
+        elapsed = time.time() - start_time
+        logger.info("Outgoing response", extra={
+            "request_id": request_id,
+            "status_code": response.status_code,
+            "elapsed_seconds": round(elapsed, 4),
+        })
+        response.headers["X-Request-ID"] = request_id
+        return response
 
-class JWTAuthMiddleware(BaseHTTPMiddleware):
+
+class MetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Routes publiques
-        public_paths = ["/docs", "/openapi.json", "/redoc", "/health", "/ping", "/api/v1/auth"]
-        if any(request.url.path.startswith(p) for p in public_paths):
-            return await call_next(request)
-
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-        return await call_next(request)
-
-def setup_middlewares(app):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=security_settings.allowed_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(JWTAuthMiddleware)
+        start_time = time.time()
+        response = await call_next(request)
+        elapsed = time.time() - start_time
+        metrics_logger.info("Metrics", extra={
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "elapsed_seconds": round(elapsed, 4),
+        })
+        response.headers["X-Process-Time"] = str(round(elapsed, 4))
+        return response
