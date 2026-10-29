@@ -1,8 +1,10 @@
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from typing import Optional
 
+
 class Settings(BaseSettings):
-    
+
     # App
     APP_NAME: str = "AI Recruiter Copilot"
     VERSION: str = "2.0.0"
@@ -23,8 +25,18 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    # Monitoring & Observability
+    LOG_LEVEL: str = "INFO"
+    LOG_JSON: bool = False
+    DEBUG: bool = False
+
+    # Legacy / env fallback
+    OPENAI_API_KEY: Optional[str] = None
+
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
 
 settings = Settings()
