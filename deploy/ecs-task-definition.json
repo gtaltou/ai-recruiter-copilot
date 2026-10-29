@@ -1,0 +1,31 @@
+{
+  "family": "ai-recruiter-copilot",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::YOUR_ACCOUNT:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "YOUR_ACCOUNT.dkr.ecr.YOUR_REGION.amazonaws.com/ai-recruiter-copilot:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 8000, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "CHROMA_HOST", "value": "chromadb.cluster-xxx.region.rds.amazonaws.com" },
+        { "name": "CHROMA_PORT", "value": "8000" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ai-recruiter-copilot",
+          "awslogs-region": "YOUR_REGION",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
+    
     # App
     APP_NAME: str = "AI Recruiter Copilot"
     VERSION: str = "2.0.0"

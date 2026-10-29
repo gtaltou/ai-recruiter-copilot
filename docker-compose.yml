@@ -1,18 +1,35 @@
-version: '3.8'
+version: "3.9"
 
 services:
+  chromadb:
+    image: chromadb/chroma:0.4.22
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+    networks:
+      - recruiter_net
+
   api:
     build: .
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
-      - chroma_data:/app/chroma_db
     env_file:
       - .env
     environment:
-      - CHROMA_PERSIST_DIR=/app/chroma_db
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    depends_on:
+      - chromadb
+    networks:
+      - recruiter_net
+    restart: unless-stopped
 
 volumes:
   chroma_data:
+
+networks:
+  recruiter_net:
+    driver: bridge
