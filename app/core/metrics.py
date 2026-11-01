@@ -1,4 +1,5 @@
 import time
+from typing import Callable
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 import logging
@@ -9,12 +10,14 @@ class MetricsMiddleware(BaseHTTPMiddleware):
     """
     Middleware pour collecter des métriques de base sur les requêtes.
     """
-    async def dispatch(self, request: Request, call_next):
-        start_time = time.time()
-        
+    async def dispatch(self, request: Request, call_next: Callable):
+        start_time = time.perf_counter()
+
         response = await call_next(request)
-        
-        process_time = time.time() - start_time
+
+        process_time = time.perf_counter() - start_time
+        # ... le reste est inchangé
+
         status_code = response.status_code
         
         logger.info(

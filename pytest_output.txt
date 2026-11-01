@@ -1,0 +1,129 @@
+============================= test session starts =============================
+platform win32 -- Python 3.10.0, pytest-8.3.4, pluggy-1.7.0 -- C:\ai-engineering\ai-recruiter-copilot\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\ai-engineering\ai-recruiter-copilot
+configfile: pytest.ini
+plugins: anyio-4.15.1, langsmith-0.14.14, asyncio-0.24.0
+asyncio: mode=auto, default_loop_scope=function
+collecting ... collected 13 items
+
+tests/test_cv_analysis.py::test_analyze_success PASSED                   [  7%]
+tests/test_cv_analysis.py::test_analyze_no_token FAILED                  [ 15%]
+tests/test_cv_analysis.py::test_analyze_invalid_token FAILED             [ 23%]
+tests/test_cv_analysis.py::test_analyze_expired_token FAILED             [ 30%]
+tests/test_cv_analysis.py::test_analyze_empty_body PASSED                [ 38%]
+tests/test_cv_analysis.py::test_analyze_missing_cv PASSED                [ 46%]
+tests/test_cv_analysis.py::test_analyze_missing_job_description PASSED   [ 53%]
+tests/test_cv_analysis.py::test_analyze_cv_empty_object PASSED           [ 61%]
+tests/test_cv_analysis.py::test_analyze_jd_empty_object PASSED           [ 69%]
+tests/test_cv_analysis.py::test_analyze_invalid_email FAILED             [ 76%]
+tests/test_cv_analysis.py::test_analyze_negative_experience FAILED       [ 84%]
+tests/test_cv_analysis.py::test_analyze_get_method PASSED                [ 92%]
+tests/test_cv_analysis.py::test_analyze_wrong_content_type PASSED        [100%]
+
+================================== FAILURES ===================================
+____________________________ test_analyze_no_token ____________________________
+
+client = <httpx.AsyncClient object at 0x0000012FA2C969E0>
+
+    @pytest.mark.asyncio
+    async def test_analyze_no_token(client):
+        """\U0001f510 Requ\xeate sans token \u2192 403."""
+        response = await client.post(
+            "/api/v1/analyze",
+            json={"cv": VALID_CV, "job_description": VALID_JD},
+        )
+>       assert response.status_code == 403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_cv_analysis.py:111: AssertionError
+_________________________ test_analyze_invalid_token __________________________
+
+client = <httpx.AsyncClient object at 0x0000012FA2C96590>
+
+    @pytest.mark.asyncio
+    async def test_analyze_invalid_token(client):
+        """\U0001f510 Token malform\xe9 \u2192 403."""
+        headers = {"Authorization": "Bearer ceci-nest-pas-un-token"}
+        response = await client.post(
+            "/api/v1/analyze",
+            json={"cv": VALID_CV, "job_description": VALID_JD},
+            headers=headers,
+        )
+>       assert response.status_code == 403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_cv_analysis.py:123: AssertionError
+_________________________ test_analyze_expired_token __________________________
+
+client = <httpx.AsyncClient object at 0x0000012FA2DA2050>
+
+    @pytest.mark.asyncio
+    async def test_analyze_expired_token(client):
+        """\U0001f510 Token expir\xe9 \u2192 403."""
+        token = jwt.encode(
+            {"sub": "test-user", "exp": 0},  # expirÚ
+            security_settings.jwt_secret_key,
+            algorithm=security_settings.jwt_algorithm,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        response = await client.post(
+            "/api/v1/analyze",
+            json={"cv": VALID_CV, "job_description": VALID_JD},
+            headers=headers,
+        )
+>       assert response.status_code == 403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_cv_analysis.py:140: AssertionError
+_________________________ test_analyze_invalid_email __________________________
+
+client = <httpx.AsyncClient object at 0x0000012FA2DC02B0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJleHAiOjk5OTk5OTk5OTl9.qxJDlZiRGZilI2uvF86YPneNKzNH0G4u1wxg6KxKcK0'}
+
+    @pytest.mark.asyncio
+    async def test_analyze_invalid_email(client, auth_headers):
+        """\u26a0\ufe0f Email invalide \u2192 422."""
+        cv = {**VALID_CV, "email": "pas-un-email"}
+        response = await client.post(
+            "/api/v1/analyze",
+            json={"cv": cv, "job_description": VALID_JD},
+            headers=auth_headers,
+        )
+>       assert response.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_cv_analysis.py:207: AssertionError
+______________________ test_analyze_negative_experience _______________________
+
+client = <httpx.AsyncClient object at 0x0000012FA2C95DE0>
+auth_headers = {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJleHAiOjk5OTk5OTk5OTl9.qxJDlZiRGZilI2uvF86YPneNKzNH0G4u1wxg6KxKcK0'}
+
+    @pytest.mark.asyncio
+    async def test_analyze_negative_experience(client, auth_headers):
+        """\u26a0\ufe0f Ann\xe9es d'exp\xe9rience n\xe9gatives \u2192 422."""
+        cv = {**VALID_CV}
+        cv["competences"] = [
+            {"nom": "Python", "niveau": "expert", "annees_experience": -5.0}
+        ]
+        response = await client.post(
+            "/api/v1/analyze",
+            json={"cv": cv, "job_description": VALID_JD},
+            headers=auth_headers,
+        )
+>       assert response.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_cv_analysis.py:222: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_cv_analysis.py::test_analyze_no_token - assert 200 == 403
+FAILED tests/test_cv_analysis.py::test_analyze_invalid_token - assert 200 == 403
+FAILED tests/test_cv_analysis.py::test_analyze_expired_token - assert 200 == 403
+FAILED tests/test_cv_analysis.py::test_analyze_invalid_email - assert 200 == 422
+FAILED tests/test_cv_analysis.py::test_analyze_negative_experience - assert 2...
+========================= 5 failed, 8 passed in 1.03s =========================
