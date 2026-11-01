@@ -1,10 +1,12 @@
 import pytest
+import pytest_asyncio          # ← ajout
+import time
+import jwt
 from fastapi import status
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.config import settings
-import jwt
-import time
+
 
 
 @pytest.fixture
@@ -40,11 +42,12 @@ def invalid_token_headers():
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
 
 
 # ── Auth tests ────────────────────────────────────────────────────────────
