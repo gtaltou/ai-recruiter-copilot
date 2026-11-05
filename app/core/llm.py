@@ -57,4 +57,17 @@ class LLMClient:
             logger.error(f"Structured LLM call failed: {e}")
             raise
 
-llm_client = LLMClient()
+_llm_client = None
+
+def get_llm_client() -> LLMClient:
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = LLMClient()
+    return _llm_client
+
+# Accès rétrocompatible : from app.core.llm import llm_client fonctionne toujours
+def __getattr__(name):
+    if name == "llm_client":
+        return get_llm_client()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
