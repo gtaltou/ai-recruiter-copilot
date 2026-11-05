@@ -7,6 +7,7 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.config import settings
 
+WRONG_JWT_SECRET = "x" * 64   # ≥ 32 octets pour HS256 → pas de warning
 
 
 @pytest.fixture
@@ -38,8 +39,9 @@ def invalid_token_headers():
         "exp": int(time.time()) + 3600,
         "iat": int(time.time()),
     }
-    token = jwt.encode(payload, "wrong-secret", algorithm="HS256")
+    token = jwt.encode(payload, WRONG_JWT_SECRET, algorithm="HS256")
     return {"Authorization": f"Bearer {token}"}
+
 
 
 @pytest_asyncio.fixture

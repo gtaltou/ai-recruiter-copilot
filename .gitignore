@@ -35,3 +35,9 @@ logs/
 
 # ChromaDB
 chroma_db/
+
+.venv-test/
+coverage.xml
+.coverage
+coverage_html/
+

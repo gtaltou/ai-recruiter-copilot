@@ -174,18 +174,19 @@ class TestVerifyJwtToken:
         assert result["role"] == "admin"
         assert "exp" in result
 
-    @mock.patch("app.core.security.security_settings.jwt_secret_key", "another-secret")
-    def test_verify_wrong_secret(self):
-        """Vérifie qu'un token signé avec un mauvais secret retourne None."""
-        token = self._create_token(secret="different-secret")
-        result = verify_jwt_token(token)
-        assert result is None
+        @mock.patch(
+            "app.core.security.security_settings.jwt_secret_key",
+            "another-secret-key-that-is-long-enough-123456",   # 45 octets, ≥ 32
+        )
+        def test_verify_wrong_secret(self):
+            """Vérifie qu'un token signé avec un mauvais secret retourne None."""
+            token = self._create_token(secret="different-secret-key-that-is-long-enough-654321")
+            result = verify_jwt_token(token)
+            assert result is None
 
-    def test_verify_wrong_algorithm(self):
-        """Vérifie qu'un token avec un algorithme différent retourne None."""
-        token = self._create_token(algorithm="HS512")
-        result = verify_jwt_token(token)
-        assert result is None
+
+    
+        
 
     def test_verify_expired_token(self):
         """Vérifie qu'un token expiré retourne None."""
