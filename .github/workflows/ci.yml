@@ -28,3 +28,13 @@ jobs:
           python -m pytest tests/ -v
         env:
           PYTHONPATH: ${{ github.workspace }}
+      - name: Générer le badge de couverture
+        run: |
+          pip install coverage-badge
+          coverage-badge -o coverage.svg -f
+
+      - name: Commiter le badge
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update coverage badge [skip ci]"
+          file_pattern: coverage.svg

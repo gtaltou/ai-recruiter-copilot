@@ -2,6 +2,9 @@
 
 Assistant IA de recrutement — Analyse de CV, matching intelligent avec descriptions de poste, et export structuré des résultats. Propulsé par LangGraph, ChromaDB et LiteLLM.
 
+![Couverture](https://raw.githubusercontent.com/gtaltou/ai-recruiter-copilot/main/coverage.svg)
+
+
 ---
 
 ## Stack technique
