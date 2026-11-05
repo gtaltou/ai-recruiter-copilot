@@ -204,12 +204,15 @@ Le dossier `deploy/` contient la définition de tâche ECS Fargate :
 
 ## Roadmap
 
+-## Roadmap
+
 - [x] **Sprint 1** — Setup, schémas Pydantic, tests CI
 - [x] **Sprint 2** — Pipeline AI (LangGraph + ChromaDB + LiteLLM)
 - [x] **Sprint 3** — Production Ready (Auth JWT, Docker, ECS, Rate Limiting, Export)
-- [ ] **Sprint 4** — Monitoring, logging, observabilité
+- [x] **Sprint 4** — Monitoring, logging, observabilité
 - [ ] **Sprint 5** — UI / Dashboard
 - [ ] **Sprint 6** — Multi-tenancy & scaling
+
 
 ---
 
