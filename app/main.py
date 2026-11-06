@@ -1,15 +1,23 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from app.api.v1.api import v1_router
 from app.core.config import settings
 from app.core.middleware import MetricsMiddleware, LoggingMiddleware, JWTAuthMiddleware
 from app.core.logging import setup_logging
-from fastapi.staticfiles import StaticFiles
+from app.db import engine, Base
 from app.web.router import router as web_router
 
 
-app = FastAPI(title=settings.APP_NAME)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup : logging + création des tables."""
+    setup_logging(log_level=settings.LOG_LEVEL, log_json=settings.LOG_JSON)
+    Base.metadata.create_all(bind=engine)
+    yield
 
-setup_logging(log_level=settings.LOG_LEVEL, log_json=settings.LOG_JSON)
+
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
 app.add_middleware(MetricsMiddleware)
 app.add_middleware(LoggingMiddleware)
