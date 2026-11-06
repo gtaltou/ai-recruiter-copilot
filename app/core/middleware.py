@@ -28,12 +28,19 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
+    """Authentification JWT — protège uniquement l'API."""
+
     async def dispatch(self, request: Request, call_next):
-        # Routes publiques (health, docs)
+        # 1) Chemins publics : le web (pages, static) n'a pas besoin de token API
+        if not request.url.path.startswith("/api"):
+            return await call_next(request)
+
+        # 2) Routes publiques de l'API (health, docs)
         if request.url.path in ["/api/v1/health", "/docs", "/openapi.json", "/redoc"] or \
            request.url.path.startswith(("/docs/", "/openapi/")):
             return await call_next(request)
 
+        # 3) Validation du token JWT pour tout le reste (/api/...)
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             return JSONResponse(status_code=403, content={"detail": "Not authenticated"})
@@ -47,3 +54,4 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=403, content={"detail": "Invalid token"})
 
         return await call_next(request)
+
