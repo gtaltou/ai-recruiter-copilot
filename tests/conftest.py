@@ -1,21 +1,30 @@
 """Fixtures partagées pour toute la suite de tests."""
-# en haut de tests/conftest.py, AVANT d'importer app.*
 import os
-os.environ["SECRET_KEY"] = "x" * 76
+import time
+from datetime import datetime, timedelta, timezone
 
+import jwt
 import pytest
 import pytest_asyncio
-import jwt
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.main import app
-from app.core.security import security_settings
+os.environ["SECRET_KEY"] = "x" * 76
 
-from datetime import datetime, timedelta, timezone
-import jwt
 from app.core.config import settings
+from app.core.security import security_settings
+from app.main import app
 
-#TEST_JWT_SECRET = settings.JWT_SECRET  # ou le bon nom d'attribut
+# Source unique du secret JWT
+TEST_JWT_SECRET = settings.JWT_SECRET
+
+
+# ---------------------------------------------------------------------------
+# JWT : clé longue pour éviter InsecureKeyLengthWarning
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _long_jwt_secret(monkeypatch):
+    """Remplace le secret JWT par settings.JWT_SECRET pendant chaque test."""
+    monkeypatch.setattr(security_settings, "jwt_secret_key", TEST_JWT_SECRET)
 
 
 @pytest.fixture
@@ -29,50 +38,9 @@ def expired_token_headers():
     return {"Authorization": f"Bearer {token}"}
 
 
-
-# ---------------------------------------------------------------------------
-# JWT : clé longue pour éviter InsecureKeyLengthWarning
-# (HS256 exige >= 32 octets, HS512 >= 64 octets)
-# ---------------------------------------------------------------------------
-#TEST_JWT_SECRET = "test-secret-" + "x" * 64  # 76 octets
-
-
-@pytest.fixture(autouse=True)
-def _long_jwt_secret(monkeypatch):
-    """Remplace le secret JWT par une version longue pendant chaque test."""
-    monkeypatch.setattr(security_settings, "jwt_secret_key", TEST_JWT_SECRET)
-
-
-# ---------------------------------------------------------------------------
-# Client HTTP asynchrone
-# ---------------------------------------------------------------------------
-
-@pytest_asyncio.fixture
-async def client():
-    """Client HTTP branché sur l'app FastAPI (équivalent httpx.AsyncClient)."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-
-
-''' @pytest.fixture
-def auth_headers(_long_jwt_secret):
-    """En-têtes d'authentification avec un token JWT valide et non expiré."""
-    token = jwt.encode(
-        {"sub": "test-user", "exp": 9999999999},
-        security_settings.jwt_secret_key,
-        algorithm=security_settings.jwt_algorithm,
-    )
-    return {"Authorization": f"Bearer {token}"} '''
-    
-    
-import time
-from app.core.config import settings
-
-TEST_JWT_SECRET = settings.JWT_SECRET  # source unique de vérité
-
 @pytest_asyncio.fixture
 def auth_headers():
+    """Token JWT valide et non expiré."""
     now = int(time.time())
     token = jwt.encode(
         {"sub": "test-user", "iat": now, "exp": now + 3600},
@@ -83,38 +51,48 @@ def auth_headers():
 
 
 # ---------------------------------------------------------------------------
-# Données de test (fixtures = retour d'une copie fraîche à chaque test)
+# Client HTTP asynchrone
 # ---------------------------------------------------------------------------
+@pytest_asyncio.fixture
+async def client():
+    """Client HTTP branché sur l'app FastAPI."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
 
+
+# ---------------------------------------------------------------------------
+# Données de test
+# ---------------------------------------------------------------------------
 @pytest.fixture
 def valid_cv() -> dict:
     return {
         "nom": "Dupont",
-            "prenom": "Marie",
-            "email": "marie.dupont@email.com",
-            "telephone": "+33123456789",
-            "titre_poste": "Data Engineer",
-            "poste_actuel": "Data Engineer",
-            "resume": "Ingénieure data passionnée.",
-            "competences": ["Python", "FastAPI", "SQL"],   # list[str] et non list[dict]
-            "annees_experience": 5.0,                      # champ requis à la racine
-            "experiences": [
-                {
-                    "titre": "Data Engineer",
-                    "entreprise": "TechCorp",
-                    "date_debut": "2021-01",
-                    "description": "Construction de pipelines ETL.",
-                }
-            ],
-            "formations": [
-                {
-                    "diplome": "Master Data Science",
-                    "etablissement": "Université Paris-Saclay",
-                    "annee": "2020",
-                }
-            ],
-            "langues": ["Français", "Anglais"],
-            "centres_interet": ["Randonnée"],
+        "prenom": "Marie",
+        "email": "marie.dupont@email.com",
+        "telephone": "+33123456789",
+        "titre_poste": "Data Engineer",
+        "poste_actuel": "Data Engineer",
+        "resume": "Ingénieure data passionnée.",
+        "competences": ["Python", "FastAPI", "SQL"],
+        "annees_experience": 5.0,
+        "experiences": [
+            {
+                "titre": "Data Engineer",
+                "entreprise": "TechCorp",
+                "date_debut": "2021-01",
+                "description": "Construction de pipelines ETL.",
+            }
+        ],
+        "formations": [
+            {
+                "diplome": "Master Data Science",
+                "etablissement": "Université Paris-Saclay",
+                "annee": "2020",
+            }
+        ],
+        "langues": ["Français", "Anglais"],
+        "centres_interet": ["Randonnée"],
     }
 
 
@@ -132,9 +110,3 @@ def valid_jd() -> dict:
         "niveau_etudes": "Master",
         "langues_requises": ["Anglais"],
     }
-    
-    
-    
-
-    
- 
