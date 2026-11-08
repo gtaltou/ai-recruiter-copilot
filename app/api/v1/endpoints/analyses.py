@@ -12,6 +12,10 @@ from app.db import get_db
 from app.db.models import Analysis
 from app.services.file_parser import parse_cv
 from app.services.analyzer import compute_match_score, generate_feedback
+from app.services.notifications import notify_async, manager
+from app.services.notifications import notify_async, manager, build_analysis_payload
+
+
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
@@ -147,6 +151,45 @@ def list_analyses(
         "size": size,
         "pages": (total + size - 1) // size if total > 0 else 0,
     }
+    
+
+@router.get("/ranking", response_model=dict)
+def ranking_analyses(
+    status: Optional[str] = Query(None, description="Filtrer par statut"),
+    min_score: Optional[float] = Query(None, ge=0, le=100, description="Score minimum"),
+    limit: int = Query(50, ge=1, le=200, description="Nombre max de résultats"),
+    db: Session = Depends(get_db),
+):
+    """Classement des candidats par score décroissant."""
+    query = db.query(Analysis).filter(Analysis.score.isnot(None))
+
+    if status:
+        query = query.filter(Analysis.status == status)
+    if min_score is not None:
+        query = query.filter(Analysis.score >= min_score)
+
+    analyses = query.order_by(Analysis.score.desc()).limit(limit).all()
+
+    ranking = []
+    for rank, a in enumerate(analyses, start=1):
+        result = json.loads(a.result_json) if a.result_json else {}
+        ranking.append({
+            "rank": rank,
+            "id": a.id,
+            "cv_filename": a.cv_filename,
+            "candidate_name": result.get("candidate_name", ""),
+            "job_title": a.job_title,
+            "score": a.score,
+            "status": a.status,
+            "feedback": result.get("feedback", ""),
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        })
+
+    return {
+        "total": len(ranking),
+        "ranking": ranking,
+    }
+
 
 
 @router.get("/{analysis_id}", response_model=AnalysisResponse)
@@ -237,6 +280,23 @@ def analyze_cv(analysis_id: str, db: Session = Depends(get_db)):
     analysis.result_json = json.dumps(result_data)
     db.commit()
     db.refresh(analysis)
+        # ── Notifications (fire & forget) ──
+    notify_async(
+        db_analysis,
+        webhook_url="",           # ← mets ton URL Slack/Discord ici ou vide
+        smtp_config=None,         # ← configure plus bas
+        email_to="",
+    )
+
+    # ── WebSocket broadcast ──
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(manager.broadcast(build_analysis_payload(db_analysis)))
+    except Exception:
+        pass
+
     return _format_response(analysis)
 
 

@@ -1,34 +1,196 @@
-{% extends "base.html" %}
-{% block title %}Dashboard — AI Recruiter Copilot{% endblock %}
-
-{% block content %}
-<div class="min-h-screen bg-gray-100">
-    <nav class="bg-white shadow p-4 flex justify-between items-center">
-        <h1 class="text-xl font-bold text-gray-800">AI Recruiter Copilot</h1>
-        <form action="/web/logout" method="post" class="inline">
-            <button type="submit" class="text-red-600 hover:underline">Déconnexion</button>
-        </form>
-    </nav>
-
-    <main class="max-w-6xl mx-auto p-6">
-        <h2 class="text-2xl font-semibold mb-6">Dashboard</h2>
-
-        <div hx-get="/api/stats" hx-trigger="load" hx-swap="innerHTML">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-white p-6 rounded-lg shadow animate-pulse">
-                    <h3 class="text-gray-500 text-sm">Analyses totales</h3>
-                    <p class="text-3xl font-bold mt-2">…</p>
-                </div>
-                <div class="bg-white p-6 rounded-lg shadow animate-pulse">
-                    <h3 class="text-gray-500 text-sm">Score moyen</h3>
-                    <p class="text-3xl font-bold mt-2">…</p>
-                </div>
-                <div class="bg-white p-6 rounded-lg shadow animate-pulse">
-                    <h3 class="text-gray-500 text-sm">Dernière analyse</h3>
-                    <p class="text-3xl font-bold mt-2">…</p>
-                </div>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - AI Recruiter</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #333; }
+        .header { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; padding: 24px 32px; }
+        .header h1 { font-size: 28px; }
+        .header p { opacity: 0.85; margin-top: 4px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .stat-card .value { font-size: 36px; font-weight: 700; color: #667eea; }
+        .stat-card .label { font-size: 14px; color: #666; margin-top: 4px; }
+        .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+        .chart-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .chart-card h3 { margin-bottom: 12px; font-size: 16px; color: #555; }
+        .chart-card canvas { max-height: 300px; }
+        .table-card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); grid-column: 1 / -1; }
+        .table-card h3 { margin-bottom: 12px; font-size: 16px; color: #555; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f8f9fa; font-weight: 600; color: #555; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge.completed { background: #d4edda; color: #155724; }
+        .badge.pending { background: #fff3cd; color: #856404; }
+        .score-bar { height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden; min-width: 80px; }
+        .score-bar .fill { height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+        @media (max-width: 768px) { .charts { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 AI Recruiter — Dashboard</h1>
+        <p>{{ ranking|length }} analyses · Mis à jour en direct</p>
+    </div>
+    <div class="container">
+        <div class="stats">
+            <div class="stat-card">
+                <div class="value">{{ stats.total }}</div>
+                <div class="label">Total analyses</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ stats.completed }}</div>
+                <div class="label">Complétées</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ stats.pending }}</div>
+                <div class="label">En attente</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ stats.avg_score }}%</div>
+                <div class="label">Score moyen</div>
             </div>
         </div>
-    </main>
-</div>
-{% endblock %}
+
+        <div class="charts">
+            <div class="chart-card">
+                <h3>📊 Scores par candidat</h3>
+                <canvas id="scoreChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>🥧 Répartition des statuts</h3>
+                <canvas id="statusChart" data-completed="{{ stats.completed }}" data-pending="{{ stats.pending }}"></canvas>
+            </div>
+        </div>
+
+        <div class="table-card">
+            <h3>🏆 Classement complet</h3>
+            <table>
+                <thead>
+                    <tr><th>#</th><th>Candidat</th><th>Poste</th><th>Score</th><th>Statut</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in ranking %}
+                    <tr>
+                        <td>{{ item.rank }}</td>
+                        <td>{{ item.candidate_name or item.cv_filename }}</td>
+                        <td>{{ item.job_title or "—" }}</td>
+                        <td>
+                            <div class="score-bar">
+                                <div class="fill" data-score="{{ item.score }}"></div>
+                            </div>
+                            {{ item.score }}%
+                        </td>
+                        <td><span class="badge {{ item.status }}">{{ item.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="ranking-data" hidden>{{ ranking_json|default([], true)|tojson|safe }}</div>
+
+    <script>
+        document.querySelectorAll('.score-bar .fill').forEach(fill => {
+            const score = Number(fill.dataset.score);
+            fill.style.width = `${score}%`;
+            fill.style.backgroundColor = score >= 80 ? '#28a745' : score >= 50 ? '#ffc107' : '#dc3545';
+        });
+
+        const rankingElement = document.getElementById('ranking-data');
+        const ranking = rankingElement ? JSON.parse(rankingElement.textContent || '[]') : [];
+        const safeRanking = Array.isArray(ranking) ? ranking : [];
+        const labels = safeRanking.map(r => r.candidate_name || r.cv_filename);
+        const scores = safeRanking.map(r => r.score);
+
+        new Chart(document.getElementById('scoreChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Score (%)',
+                    data: scores,
+                    backgroundColor: scores.map(s => s >= 80 ? '#28a745' : s >= 50 ? '#ffc107' : '#dc3545'),
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: { x: { min: 0, max: 100 } }
+            }
+        });
+
+        const statusChart = document.getElementById('statusChart');
+        const completedCount = Number(statusChart.dataset.completed);
+        const pendingCount = Number(statusChart.dataset.pending);
+
+        new Chart(statusChart, {
+            type: 'doughnut',
+            data: {
+                labels: ['Complétées', 'En attente'],
+                datasets: [{
+                    data: [completedCount, pendingCount],
+                    backgroundColor: ['#28a745', '#ffc107']
+                }]
+            }
+        });
+    </script>
+    <script>
+    // ── WebSocket temps réel ──
+    (function() {
+        const ws = new WebSocket("ws://" + location.host + "/ws");
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.event === "analysis.completed") {
+                const toast = document.createElement("div");
+                toast.style.cssText = `
+                    position: fixed; bottom: 20px; right: 20px;
+                    background: #28a745; color: #fff;
+                    padding: 16px 24px; border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    z-index: 9999; animation: fadeIn 0.3s ease;
+                    max-width: 400px;
+                `;
+                toast.innerHTML = `
+                    <strong>✅ Nouvelle analyse</strong><br>
+                    ${data.candidate} — <strong>${data.score}%</strong><br>
+                    <small>${data.job_title}</small>
+                `;
+                document.body.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.opacity = "0";
+                    toast.style.transition = "opacity 0.5s";
+                    setTimeout(() => toast.remove(), 500);
+                }, 5000);
+            }
+        };
+        ws.onclose = function() {
+            console.log("WebSocket déconnecté, reconnexion dans 5s...");
+            setTimeout(() => {
+                window.location.reload();
+            }, 5000);
+        };
+    })();
+
+    // Animation fadeIn
+    const style = document.createElement("style");
+    style.textContent = `
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    `;
+    document.head.appendChild(style);
+</script>
+
+</body>
+</html>
