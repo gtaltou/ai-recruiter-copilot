@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — AI Recruiter Copilot{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-100">
+    <nav class="bg-white shadow p-4 flex justify-between items-center">
+        <h1 class="text-xl font-bold text-gray-800">AI Recruiter Copilot</h1>
+        <form action="/web/logout" method="post" class="inline">
+            <button type="submit" class="text-red-600 hover:underline">Déconnexion</button>
+        </form>
+    </nav>
+
+    <main class="max-w-6xl mx-auto p-6">
+        <h2 class="text-2xl font-semibold mb-6">Dashboard</h2>
+
+        <div hx-get="/api/stats" hx-trigger="load" hx-swap="innerHTML">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow animate-pulse">
+                    <h3 class="text-gray-500 text-sm">Analyses totales</h3>
+                    <p class="text-3xl font-bold mt-2">…</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow animate-pulse">
+                    <h3 class="text-gray-500 text-sm">Score moyen</h3>
+                    <p class="text-3xl font-bold mt-2">…</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow animate-pulse">
+                    <h3 class="text-gray-500 text-sm">Dernière analyse</h3>
+                    <p class="text-3xl font-bold mt-2">…</p>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}

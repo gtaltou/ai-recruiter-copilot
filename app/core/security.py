@@ -65,3 +65,19 @@ def verify_jwt_token(token: str) -> dict[str, Any] | None:
         return payload
     except jwt.PyJWTError:
         return None
+
+def create_access_token(data: dict[str, Any], expires_delta: int | None = None) -> str:
+    """Crée un token JWT signé."""
+    to_encode = data.copy()
+    expire = time.time() + (expires_delta or security_settings.jwt_expiration_minutes * 60)
+    to_encode.update({"exp": expire})
+    return jwt.encode(
+        to_encode,
+        security_settings.jwt_secret_key,
+        algorithm=security_settings.jwt_algorithm,
+    )
+
+
+def verify_token(token: str) -> dict[str, Any] | None:
+    """Alias pour verify_jwt_token — utilisé par le routeur web."""
+    return verify_jwt_token(token)

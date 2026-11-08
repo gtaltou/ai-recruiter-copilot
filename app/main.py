@@ -9,6 +9,9 @@ from app.db import engine, Base
 from app.web.router import router as web_router
 
 
+
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup : logging + création des tables."""
@@ -26,3 +29,5 @@ app.add_middleware(JWTAuthMiddleware)
 app.include_router(v1_router, prefix="/api/v1")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(web_router)
+
+
