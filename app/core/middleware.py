@@ -1,77 +1,140 @@
-import time
+from __future__ import annotations
+
 import logging
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+import re
+import time
+from typing import Any
+from urllib.parse import parse_qs
 
 import jwt
-from app.core.security import security_settings
+from starlette.authentication import AuthenticationError
+from starlette.datastructures import MutableHeaders
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
-metrics_logger = logging.getLogger("app.metrics")
+from app.core.security import rate_limiter, security_settings
 
+logger = logging.getLogger(__name__)
 
-class MetricsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        start_time = time.time()
-        response = await call_next(request)
-        elapsed = time.time() - start_time
-        response.headers["X-Process-Time"] = str(elapsed)
-        return response
+EXEMPT_PATHS: set[str] = {
+    "/",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/favicon.ico",
+    "/dashboard",
+    "/api/v1/health",
+    "/api/v1/auth/login",
+    "/api/v1/auth/register",
+}
+
+EXEMPT_PREFIXES: tuple[str, ...] = (
+    "/web/",
+    "/static/",
+    "/templates/",
+)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        logger = logging.getLogger("app.metrics")
-        logger.info(f"Request: {request.method} {request.url.path}")
+    """Middleware qui log chaque requête et sa durée."""
+
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
         start_time = time.time()
         response = await call_next(request)
-        elapsed = time.time() - start_time
-        logger.info(f"Response: {response.status_code} ({elapsed:.3f}s)")
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(
+            "%s %s -> %d (%.1f ms)",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+        )
         return response
 
 
+class MetricsMiddleware(BaseHTTPMiddleware):
+    """Middleware qui collecte des métriques basiques (requêtes, statuts, latence)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+        self.request_count = 0
+        self.status_counts: dict[int, int] = {}
+        self.total_latency = 0.0
+
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        self.request_count += 1
+        start = time.time()
+        response = await call_next(request)
+        latency = time.time() - start
+        self.total_latency += latency
+        self.status_counts[response.status_code] = (
+            self.status_counts.get(response.status_code, 0) + 1
+        )
+        response.headers["X-Process-Time"] = f"{latency * 1000:.1f}"
+        return response
+
+
+
 class JWTAuthMiddleware(BaseHTTPMiddleware):
-    """Middleware JWT : lit le token depuis le header Authorization ou le cookie access_token."""
+    """Middleware JWT qui protège les routes de l'API."""
 
-    EXEMPT_PATHS = {
-        "/web/login",
-        "/login",
-        "/dev-token",
-        "/health",
-        "/health_check",
-        "/docs",
-        "/redoc",
-        "/openapi.json",
-    }
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+        self.secret_key = security_settings.jwt_secret_key
+        self.algorithm = security_settings.jwt_algorithm
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
-        path = request.url.path
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        path = request.url.path.rstrip("/") or "/"
 
-        if path.startswith("/web") or path.startswith("/static") or path.startswith("/templates"):
+        # Vérifier si la route est exemptée
+        if path in EXEMPT_PATHS or any(
+            path.startswith(prefix) for prefix in EXEMPT_PREFIXES
+        ):
             return await call_next(request)
 
-        if path in self.EXEMPT_PATHS:
-            return await call_next(request)
-
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1]
+        # Extraire le token
+        auth_header = request.headers.get("Authorization", "")
+        token = ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
 
         if not token:
-            token = request.cookies.get("access_token")
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Not authenticated"},
+            )
 
-        if token:
-            try:
-                jwt.decode(
-                    token,
-                    security_settings.jwt_secret_key,
-                    algorithms=[security_settings.jwt_algorithm],
-                )
-                return await call_next(request)
-            except jwt.ExpiredSignatureError:
-                return JSONResponse(status_code=401, content={"detail": "Token expired"})
-            except jwt.InvalidTokenError:
-                return JSONResponse(status_code=403, content={"detail": "Invalid token"})
+        try:
+            payload = jwt.decode(
+                token,
+                self.secret_key,
+                algorithms=[self.algorithm],
+            )
+            request.state.user = payload
+        except jwt.ExpiredSignatureError:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Token expired"},
+            )
+        except jwt.PyJWTError:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Invalid token"},
+            )
 
-        return JSONResponse(status_code=403, content={"detail": "Not authenticated"})
+        return await call_next(request)
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Middleware de rate limiting par IP."""
+
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        client_ip = request.client.host if request.client else "unknown"
+        if not rate_limiter.check(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Try again later."},
+            )
+        return await call_next(request)
