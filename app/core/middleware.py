@@ -28,6 +28,7 @@ EXEMPT_PATHS: set[str] = {
     "/api/v1/health",
     "/api/v1/auth/login",
     "/api/v1/auth/register",
+    "/metrics",
 }
 
 EXEMPT_PREFIXES: tuple[str, ...] = (
