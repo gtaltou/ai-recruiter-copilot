@@ -1,12 +1,12 @@
+"""Configuration de logging structuré pour l'application."""
+
 import logging
 import sys
-import uuid
 from contextvars import ContextVar
-from datetime import datetime, timezone
 
 from pythonjsonlogger import jsonlogger
 
-# ContextVar pour propager le request_id dans toute la requête
+# ContextVars pour le suivi des métadonnées de requête
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 user_id_var: ContextVar[str] = ContextVar("user_id", default="")
 
@@ -21,33 +21,35 @@ class RequestIdFilter(logging.Filter):
 
 
 def setup_logging() -> None:
-    """Configure le logging structuré JSON pour toute l'application."""
-    log_level = logging.getLevelName("INFO")
+    """Configure le logging structuré en JSON pour l'application."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(log_level)
+    # Évite la duplication des handlers
+    if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = jsonlogger.JsonFormatter(
+            fmt="%(asctime)s %(name)s %(levelname)s %(message)s %(request_id)s %(user_id)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
+        handler.setFormatter(formatter)
+        handler.addFilter(RequestIdFilter())
+        root.addHandler(handler)
 
-    formatter = jsonlogger.JsonFormatter(
-        fmt="%(asctime)s %(name)s %(levelname)s %(message)s %(request_id)s %(user_id)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-    )
-    handler.setFormatter(formatter)
-    handler.addFilter(RequestIdFilter())
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-    # Éviter les doublons de handlers
-    if not root_logger.handlers:
-        root_logger.addHandler(handler)
-
-    # Réduire le bruit des bibliothèques tierces
+    # Réduit le bruit des bibliothèques tierces
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("chromadb").setLevel(logging.WARNING)
 
-    logging.info("Structured JSON logging configured", extra={"event": "startup"})
+    root.info("Structured JSON logging configured")
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Retourne un logger avec le nom du module."""
+    """Retourne un logger pour le module donné.
+
+    Args:
+        name: Nom du module (généralement __name__).
+
+    Returns:
+        Une instance de logging.Logger configurée.
+    """
     return logging.getLogger(name)

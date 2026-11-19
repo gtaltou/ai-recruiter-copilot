@@ -95,10 +95,6 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
        
-
-
-@app.on_event("startup")
-
 # === NOUVEAU : Endpoint Prometheus ===
 @app.get("/metrics", include_in_schema=False)
 async def metrics():

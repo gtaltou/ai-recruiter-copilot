@@ -12,7 +12,6 @@ from app.db import get_db
 from app.db.models import Analysis
 from app.services.file_parser import parse_cv
 from app.services.analyzer import compute_match_score, generate_feedback
-from app.services.notifications import notify_async, manager
 from app.services.notifications import notify_async, manager, build_analysis_payload
 
 
@@ -284,7 +283,7 @@ def analyze_cv(analysis_id: str, db: Session = Depends(get_db)):
     db.refresh(analysis)
         # ── Notifications (fire & forget) ──
     notify_async(
-        db_analysis,
+        analysis,
         webhook_url="",           # ← mets ton URL Slack/Discord ici ou vide
         smtp_config=None,         # ← configure plus bas
         email_to="",
@@ -358,3 +357,4 @@ def export_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=analyses.csv"},
     )
+
