@@ -16,14 +16,13 @@ from starlette.middleware.base import RequestResponseEndpoint
 
 from app.core.middleware import LoggingMiddleware, JWTAuthMiddleware
 from app.core.config import settings
-from app.core.middleware import StructuredLoggingMiddleware as SLM
-
 from app.core.middleware import (
-    LoggingMiddleware,
-    JWTAuthMiddleware,
-    StructuredLoggingMiddleware,   # ← Ajoute cette ligne
+    LoggingMiddleware as SLM,
+    RequestLogContext,
+    ResponseLogContext,
 )
-
+from app.core.metrics import MetricsMiddleware
+from app.core.middleware import StructuredLoggingMiddleware
 class TestLoggingMiddleware:
     """Vérifie que chaque requête/réponse est bien loguée."""
 
