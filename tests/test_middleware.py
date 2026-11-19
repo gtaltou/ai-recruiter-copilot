@@ -1,28 +1,28 @@
-"""Tests pour app/core/middleware.py (LoggingMiddleware & JWTAuthMiddleware)."""
 import asyncio
 import time
 import logging
 import jwt
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-...
-
+from fastapi import FastAPI
 import time
 import logging
 import jwt
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from httpx import AsyncClient, ASGITransport
 from starlette.middleware.base import RequestResponseEndpoint
 
 from app.core.middleware import LoggingMiddleware, JWTAuthMiddleware
 from app.core.config import settings
+from app.core.middleware import StructuredLoggingMiddleware as SLM
 
-
-# ──────────────────────────────────────────────
-# LoggingMiddleware
-# ──────────────────────────────────────────────
+from app.core.middleware import (
+    LoggingMiddleware,
+    JWTAuthMiddleware,
+    StructuredLoggingMiddleware,   # ← Ajoute cette ligne
+)
 
 class TestLoggingMiddleware:
     """Vérifie que chaque requête/réponse est bien loguée."""
@@ -69,11 +69,6 @@ class TestLoggingMiddleware:
         await middleware.dispatch(request, fake_call_next)
 
         assert any("500" in r.message for r in caplog.records)
-
-
-# ──────────────────────────────────────────────
-# JWTAuthMiddleware
-# ──────────────────────────────────────────────
 
 def _valid_token():
     """Génère un token JWT valide avec les bons paramètres."""
@@ -186,3 +181,18 @@ class TestJWTAuthMiddleware:
 
         response = await middleware.dispatch(request, fake_call_next)
         assert response.status_code == 403
+        
+@pytest.mark.asyncio
+async def test_structured_logging_middleware_200():
+    app = FastAPI()
+    app.add_middleware(StructuredLoggingMiddleware)
+    
+    @app.get("/test")
+    async def test():
+        return {"ok": True}
+    
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/test")
+        assert response.status_code == 200
+        assert "X-Request-ID" in response.headers
+       

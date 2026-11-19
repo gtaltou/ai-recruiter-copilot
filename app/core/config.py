@@ -1,8 +1,14 @@
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        frozen=True,
+    )
+
     APP_NAME: str = "AI Recruiter Copilot"
+    ENVIRONMENT: str = "development"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     LOG_JSON: bool = False
@@ -17,10 +23,5 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     WEBHOOK_URL: str = ""
     NOTIFY_EMAIL_TO: str = ""
-
-
-
-    model_config = ConfigDict(env_file=".env", extra="ignore")
-
 
 settings = Settings()

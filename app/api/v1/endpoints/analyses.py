@@ -87,8 +87,7 @@ def create_analysis(payload: AnalysisCreate, db: Session = Depends(get_db)):
     analysis = Analysis(
         id=analysis_id,
         cv_filename=filename,
-        job_title=payload.job_title or "",
-        score=None,
+        job_title=payload.job_title or "",        
         status="pending",
         result_json=json.dumps(result_data),
         created_at=datetime.now(timezone.utc),
@@ -104,7 +103,7 @@ def list_analyses(
     page: int = Query(1, ge=1, description="Numéro de page"),
     size: int = Query(20, ge=1, le=100, description="Éléments par page"),
     sort_by: str = Query("created_at", description="Colonne de tri"),
-    order: str = Query("desc", regex="^(asc|desc)$", description="Ordre de tri"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="Ordre de tri"),
     min_score: Optional[float] = Query(None, ge=0, le=100, description="Score minimum"),
     status: Optional[str] = Query(None, description="Filtrer par statut"),
     keyword: Optional[str] = Query(None, description="Recherche textuelle"),
@@ -223,7 +222,10 @@ async def upload_cv(
     filename = file.filename or f"cv_{analysis_id[:8]}.pdf"
 
     file_bytes = file.file.read()
-    filepath, cv_text = parse_cv(file_bytes, file.filename or "document.pdf")
+    try:
+        filepath, cv_text = parse_cv(file_bytes, file.filename or "document.pdf")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
     result_data = {
