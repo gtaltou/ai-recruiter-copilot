@@ -162,3 +162,80 @@ async def test_metrics_middleware_works_with_concurrent_requests(app: FastAPI):
         results = await asyncio.gather(*[make_request() for _ in range(5)])
         assert all(r > 0 for r in results)
         assert len(results) == 5
+        
+"""Tests pour le module app.core.metrics."""
+import pytest
+from httpx import AsyncClient, ASGITransport
+from fastapi import FastAPI
+from app.core.metrics import MetricsMiddleware
+
+
+@pytest.fixture
+def app_with_metrics():
+    """Crée une app FastAPI avec le middleware de métriques."""
+    app = FastAPI()
+    app.add_middleware(MetricsMiddleware)
+
+    @app.get("/test")
+    async def test_endpoint():
+        return {"message": "ok"}
+
+    @app.get("/slow")
+    async def slow_endpoint():
+        import asyncio
+        await asyncio.sleep(0.1)
+        return {"message": "slow"}
+
+    @app.post("/data")
+    async def data_endpoint():
+        return {"received": True}
+
+    return app
+
+
+class TestMetricsMiddleware:
+    """Tests pour le MetricsMiddleware."""
+
+    @pytest.mark.asyncio
+    async def test_adds_process_time_header(self, app_with_metrics):
+        """Vérifie que le header X-Process-Time-Ms est ajouté."""
+        transport = ASGITransport(app=app_with_metrics)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/test")
+
+        assert response.status_code == 200
+        assert "X-Process-Time-Ms" in response.headers
+        process_time = float(response.headers["X-Process-Time-Ms"])
+        assert process_time > 0
+
+    @pytest.mark.asyncio
+    async def test_process_time_in_seconds(self, app_with_metrics):
+        """Vérifie que le temps est en secondes (float)."""
+        transport = ASGITransport(app=app_with_metrics)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/slow")
+
+        process_time = float(response.headers["X-Process-Time-Ms"])
+        assert process_time >= 0.1  # Au moins 100ms
+
+    @pytest.mark.asyncio
+    async def test_works_for_different_http_methods(self, app_with_metrics):
+        """Vérifie que le middleware fonctionne pour GET et POST."""
+        transport = ASGITransport(app=app_with_metrics)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            get_resp = await client.get("/test")
+            post_resp = await client.post("/data", json={"key": "value"})
+
+        assert "X-Process-Time-Ms" in get_resp.headers
+        assert "X-Process-Time-Ms" in post_resp.headers
+
+    @pytest.mark.asyncio
+    async def test_handles_404_errors(self, app_with_metrics):
+        """Vérifie que le middleware fonctionne même sur les 404."""
+        transport = ASGITransport(app=app_with_metrics)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/nonexistent")
+
+        assert response.status_code == 404
+        assert "X-Process-Time-Ms" in response.headers
+        

@@ -3,10 +3,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.api.v1.api import v1_router
 from app.core.config import settings
-from app.core.middleware import MetricsMiddleware, LoggingMiddleware, JWTAuthMiddleware
+from app.core.middleware import LoggingMiddleware, JWTAuthMiddleware
+from app.core.metrics import MetricsMiddleware
 from app.core.logging import setup_logging
 from app.db import engine, Base
 from app.web.router import router as web_router
+from app.web.dependencies import require_auth
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -17,6 +19,10 @@ from fastapi import Depends
 import json
 from fastapi import WebSocket, WebSocketDisconnect
 from app.services.notifications import manager
+from app.core.metrics import APP_INFO, generate_latest, CONTENT_TYPE_LATEST
+from fastapi.responses import PlainTextResponse
+from app.web.dependencies import require_auth
+
 
 
 
@@ -36,7 +42,7 @@ app.add_middleware(JWTAuthMiddleware)
 templates = Jinja2Templates(directory="app/templates")
 
 @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
-def dashboard(request: Request, db: Session = Depends(get_db)):
+def dashboard(request: Request, db: Session = Depends(get_db), _=Depends(require_auth)):
     from app.api.v1.endpoints.analyses import get_db as _get_db
     # On récupère le classement directement
     analyses = db.query(Analysis).filter(Analysis.score.isnot(None)).order_by(Analysis.score.desc()).all()
@@ -88,6 +94,20 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+       
+
+
+@app.on_event("startup")
+
+# === NOUVEAU : Endpoint Prometheus ===
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    """Endpoint Prometheus pour le scraping."""
+    return PlainTextResponse(
+        content=generate_latest().decode("utf-8"),
+        media_type=CONTENT_TYPE_LATEST,
+    )
+
 
 
 
