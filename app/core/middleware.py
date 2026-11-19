@@ -1,196 +1,260 @@
-from __future__ import annotations
+"""Middleware ASGI pour le logging structuré et l'authentification JWT."""
 
-import logging
-import re
 import time
-from typing import Any
-from urllib.parse import parse_qs
+import uuid
 import logging
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable, Optional
+
 import jwt
-from starlette.authentication import AuthenticationError
-from starlette.datastructures import MutableHeaders
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.core.security import rate_limiter, security_settings
-
+from app.core.config import settings
+import logging
 logger = logging.getLogger(__name__)
 
-EXEMPT_PATHS: set[str] = {
-    "/",
+# Routes publiques qui ne nécessitent pas de token JWT
+PUBLIC_ROUTES = {
+    "/api/v1/health",
     "/docs",
-    "/redoc",
     "/openapi.json",
-    "/favicon.ico",
-    "/dashboard",
+    "/redoc",
+    "/api/v1/docs",
+    # Routes web
+    "/",
     "/login",
     "/logout",
+    "/dashboard",
     "/dev-token",
     "/api/stats",
-    "/api/v1/health",
-    "/api/v1/auth/login",
-    "/api/v1/auth/register",
+    # Métriques Prometheus
     "/metrics",
 }
 
 
-EXEMPT_PREFIXES: tuple[str, ...] = (
-    "/web/",
-    "/static/",
-    "/templates/",
-)
+
+# ──────────────────────────────────────────────
+#  Dataclasses de contexte
+# ──────────────────────────────────────────────
+
+@dataclass
+class RequestLogContext:
+    """Contexte de logging pour une requête HTTP."""
+    method: str = ""
+    path: str = ""
+    query: str = ""
+    request_id: str = ""
+    body_preview: str = ""
 
 
-class LoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware qui log chaque requête et sa durée."""
+@dataclass
+class ResponseLogContext:
+    """Contexte de logging pour une réponse HTTP."""
+    status_code: int = 0
+    elapsed_ms: float = 0.0
+    request_id: str = ""
 
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
-        start_time = time.time()
+
+# ──────────────────────────────────────────────
+#  StructuredLoggingMiddleware (style Starlette)
+#  Ajoute un X-Request-ID et logue les requêtes
+# ──────────────────────────────────────────────
+
+class StructuredLoggingMiddleware(BaseHTTPMiddleware):
+    """Log structuré de chaque requête HTTP."""
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = str(uuid.uuid4())[:8]
+        start_time = time.perf_counter()
+
+        # Injecter request_id dans le state pour traçabilité interne
+        request.state.request_id = request_id
+
+        try:
+            response: Response = await call_next(request)
+        except Exception as exc:
+            elapsed = time.perf_counter() - start_time
+            logger.error(
+                "Request failed",
+                extra={
+                    "props": {
+                        "request_id": request_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                        "query": str(request.query_params),
+                        "elapsed_ms": round(elapsed * 1000, 2),
+                        "status_code": 500,
+                        "error": str(exc),
+                    }
+                },
+            )
+            raise
+
+        elapsed = time.perf_counter() - start_time
+
+        # Log si erreur (>=400) ou si DEBUG est activé
+        should_log = (
+            response.status_code >= 400
+            or logger.isEnabledFor(logging.DEBUG)
+        )
+
+        if should_log:
+            level = logger.error if response.status_code >= 500 else logger.warning
+            level(
+                f"{request.method} {request.url.path} -> {response.status_code}",
+                extra={
+                    "props": {
+                        "request_id": request_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status_code": response.status_code,
+                        "elapsed_ms": round(elapsed * 1000, 2),
+                    }
+                },
+            )
+
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
+# ──────────────────────────────────────────────
+#  LoggingMiddleware (ASGI natif + dispatch)
+#  Logue chaque requête/réponse de façon simple
+# ──────────────────────────────────────────────
+
+class LoggingMiddleware:
+    """Middleware ASGI qui logue chaque requête/réponse."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start = time.perf_counter()
+        method = scope.get("method", "")
+        path = scope.get("path", "")
+
+        async def _send(message):
+            if message["type"] == "http.response.start":
+                elapsed = (time.perf_counter() - start) * 1000
+                status = message.get("status", 0)
+                logger.info(
+                    "%s %s -> %d (%.1f ms)",
+                    method,
+                    path,
+                    status,
+                    elapsed,
+                )
+            await send(message)
+
+        await self.app(scope, receive, _send)
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Méthode de compatibilité pour les tests unitaires."""
+        start = time.perf_counter()
         response = await call_next(request)
-        duration_ms = (time.time() - start_time) * 1000
+        elapsed = (time.perf_counter() - start) * 1000
         logger.info(
             "%s %s -> %d (%.1f ms)",
             request.method,
             request.url.path,
             response.status_code,
-            duration_ms,
+            elapsed,
         )
         return response
 
 
-class MetricsMiddleware(BaseHTTPMiddleware):
-    """Middleware qui collecte des métriques basiques (requêtes, statuts, latence)."""
+# ──────────────────────────────────────────────
+#  JWTAuthMiddleware (ASGI natif + dispatch)
+#  Protège les routes par JWT
+# ──────────────────────────────────────────────
 
-    def __init__(self, app: ASGIApp) -> None:
-        super().__init__(app)
-        self.request_count = 0
-        self.status_counts: dict[int, int] = {}
-        self.total_latency = 0.0
+class JWTAuthMiddleware:
+    """Middleware ASGI qui protège les routes par JWT."""
 
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
-        self.request_count += 1
-        start = time.time()
-        response = await call_next(request)
-        latency = time.time() - start
-        self.total_latency += latency
-        self.status_counts[response.status_code] = (
-            self.status_counts.get(response.status_code, 0) + 1
-        )
-        response.headers["X-Process-Time"] = f"{latency * 1000:.1f}"
-        return response
+    def __init__(self, app: ASGIApp):
+        self.app = app
 
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
+        path = scope.get("path", "")
+        if path in PUBLIC_ROUTES:
+            await self.app(scope, receive, send)
+            return
 
-class JWTAuthMiddleware(BaseHTTPMiddleware):
-    """Middleware JWT qui protège les routes de l'API."""
+        headers = dict(scope.get("headers", []))
+        auth_header = headers.get(b"authorization", b"").decode()
 
-    def __init__(self, app: ASGIApp) -> None:
-        super().__init__(app)
-        self.secret_key = security_settings.jwt_secret_key
-        self.algorithm = security_settings.jwt_algorithm
+        if not auth_header.startswith("Bearer "):
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": "Authentication required"},
+            )
+            await self._send_response(scope, receive, send, response)
+            return
 
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
-        path = request.url.path.rstrip("/") or "/"
+        token = auth_header[7:]
+        try:
+            jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+        except jwt.ExpiredSignatureError:
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": "Token has expired"},
+            )
+            await self._send_response(scope, receive, send, response)
+            return
+        except jwt.InvalidTokenError:
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": "Invalid token"},
+            )
+            await self._send_response(scope, receive, send, response)
+            return
 
-        # Vérifier si la route est exemptée
-        if path in EXEMPT_PATHS or any(
-            path.startswith(prefix) for prefix in EXEMPT_PREFIXES
-        ):
+        await self.app(scope, receive, send)
+
+    async def _send_response(
+        self, scope: Scope, receive: Receive, send: Send, response: JSONResponse
+    ) -> None:
+        """Envoie une réponse JSON directement via le protocole ASGI."""
+        await response(scope, receive, send)
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Méthode de compatibilité pour les tests unitaires."""
+        path = request.url.path
+
+        if path in PUBLIC_ROUTES:
             return await call_next(request)
 
-        # Extraire le token
         auth_header = request.headers.get("Authorization", "")
-        token = ""
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-
-        if not token:
+        if not auth_header.startswith("Bearer "):
             return JSONResponse(
                 status_code=403,
-                content={"detail": "Not authenticated"},
+                content={"detail": "Authentication required"},
             )
 
+        token = auth_header[7:]
         try:
-            payload = jwt.decode(
-                token,
-                self.secret_key,
-                algorithms=[self.algorithm],
-            )
-            request.state.user = payload
+            jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
         except jwt.ExpiredSignatureError:
             return JSONResponse(
                 status_code=403,
-                content={"detail": "Token expired"},
+                content={"detail": "Token has expired"},
             )
-        except jwt.PyJWTError:
+        except jwt.InvalidTokenError:
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Invalid token"},
             )
 
         return await call_next(request)
-
-
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Middleware de rate limiting par IP."""
-
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
-        client_ip = request.client.host if request.client else "unknown"
-        if not rate_limiter.check(client_ip):
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Rate limit exceeded. Try again later."},
-            )
-        return await call_next(request)
-    
-class StructuredLoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware qui journalise chaque requête/réponse en format structuré JSON."""
-
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        start_time = time.time()
-        response = await call_next(request)
-        process_time = time.time() - start_time
-
-        logging.getLogger("structured").info(
-            "Request processed",
-            extra={
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "process_time_ms": round(process_time * 1000, 2),
-                "client_host": request.client.host if request.client else None,
-            },
-        )
-        return response
-    
-import uuid  # ← à ajouter en haut du fichier
-
-class StructuredLoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware qui journalise chaque requête/réponse en format structuré JSON."""
-
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        start_time = time.time()
-        request_id = str(uuid.uuid4())  # ← génération d'un ID unique
-        response = await call_next(request)
-        process_time = time.time() - start_time
-
-        response.headers["X-Request-ID"] = request_id  # ← injection du header
-
-        logging.getLogger("structured").info(
-            "Request processed",
-            extra={
-                "request_id": request_id,              # ← inclus dans les logs
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "process_time_ms": round(process_time * 1000, 2),
-                "client_host": request.client.host if request.client else None,
-            },
-        )
-        return response
-
-   
-   
