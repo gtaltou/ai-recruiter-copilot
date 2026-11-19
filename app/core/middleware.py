@@ -5,7 +5,8 @@ import re
 import time
 from typing import Any
 from urllib.parse import parse_qs
-
+import logging
+from typing import Callable
 import jwt
 from starlette.authentication import AuthenticationError
 from starlette.datastructures import MutableHeaders
@@ -25,11 +26,16 @@ EXEMPT_PATHS: set[str] = {
     "/openapi.json",
     "/favicon.ico",
     "/dashboard",
+    "/login",
+    "/logout",
+    "/dev-token",
+    "/api/stats",
     "/api/v1/health",
     "/api/v1/auth/login",
     "/api/v1/auth/register",
     "/metrics",
 }
+
 
 EXEMPT_PREFIXES: tuple[str, ...] = (
     "/web/",
@@ -139,3 +145,52 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Rate limit exceeded. Try again later."},
             )
         return await call_next(request)
+    
+class StructuredLoggingMiddleware(BaseHTTPMiddleware):
+    """Middleware qui journalise chaque requête/réponse en format structuré JSON."""
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        start_time = time.time()
+        response = await call_next(request)
+        process_time = time.time() - start_time
+
+        logging.getLogger("structured").info(
+            "Request processed",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "process_time_ms": round(process_time * 1000, 2),
+                "client_host": request.client.host if request.client else None,
+            },
+        )
+        return response
+    
+import uuid  # ← à ajouter en haut du fichier
+
+class StructuredLoggingMiddleware(BaseHTTPMiddleware):
+    """Middleware qui journalise chaque requête/réponse en format structuré JSON."""
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        start_time = time.time()
+        request_id = str(uuid.uuid4())  # ← génération d'un ID unique
+        response = await call_next(request)
+        process_time = time.time() - start_time
+
+        response.headers["X-Request-ID"] = request_id  # ← injection du header
+
+        logging.getLogger("structured").info(
+            "Request processed",
+            extra={
+                "request_id": request_id,              # ← inclus dans les logs
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "process_time_ms": round(process_time * 1000, 2),
+                "client_host": request.client.host if request.client else None,
+            },
+        )
+        return response
+
+   
+   

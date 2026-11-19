@@ -11,7 +11,7 @@ class Analysis(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     cv_filename = Column(String, nullable=False)
     job_title = Column(String, nullable=False)
-    score = Column(Float, nullable=False)
+    score = Column(Float, nullable=False, default=0.0)
     status = Column(String, default="completed")
     result_json = Column(Text, nullable=True)  # stockage du résultat complet en JSON
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

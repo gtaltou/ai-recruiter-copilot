@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 from docx import Document
 
 
@@ -9,8 +10,12 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 def extract_text_from_pdf(filepath: str) -> str:
-    reader = PdfReader(filepath)
-    return "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+    try:
+        reader = PdfReader(filepath)
+        return "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+    except PdfReadError:
+        raise ValueError("Le fichier PDF est corrompu ou invalide")
+
 
 
 def extract_text_from_docx(filepath: str) -> str:
@@ -39,3 +44,5 @@ def parse_cv(file_bytes: bytes, filename: str) -> tuple[str, str]:
         raise ValueError(f"Format non supporté : {ext}. Utilisez .pdf ou .docx")
 
     return filepath, text
+
+
